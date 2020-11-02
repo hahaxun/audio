@@ -27,6 +27,7 @@ __all__ = [
     'FrequencyMasking',
     'TimeMasking',
     'SlidingWindowCmn',
+    'Vad',
 ]
 
 
@@ -85,20 +86,8 @@ class Spectrogram(torch.nn.Module):
 
 class GriffinLim(torch.nn.Module):
     r"""Compute waveform from a linear scale magnitude spectrogram using the Griffin-Lim transformation.
-        Implementation ported from `librosa`.
 
-    .. [1] McFee, Brian, Colin Raffel, Dawen Liang, Daniel PW Ellis, Matt McVicar, Eric Battenberg, and Oriol Nieto.
-        "librosa: Audio and music signal analysis in python."
-        In Proceedings of the 14th python in science conference, pp. 18-25. 2015.
-
-    .. [2] Perraudin, N., Balazs, P., & Søndergaard, P. L.
-        "A fast Griffin-Lim algorithm,"
-        IEEE Workshop on Applications of Signal Processing to Audio and Acoustics (pp. 1-4),
-        Oct. 2013.
-
-    .. [3] D. W. Griffin and J. S. Lim,
-        "Signal estimation from modified short-time Fourier transform,"
-        IEEE Trans. ASSP, vol.32, no.2, pp.236–243, Apr. 1984.
+    Implementation ported from ``librosa`` [1]_, [2]_, [3]_.
 
     Args:
         n_fft (int, optional): Size of FFT, creates ``n_fft // 2 + 1`` bins. (Default: ``400``)
@@ -116,6 +105,24 @@ class GriffinLim(torch.nn.Module):
             Values near 1 can lead to faster convergence, but above 1 may not converge. (Default: ``0.99``)
         length (int, optional): Array length of the expected output. (Default: ``None``)
         rand_init (bool, optional): Initializes phase randomly if True and to zero otherwise. (Default: ``True``)
+
+    References:
+        .. [1]
+           | McFee, Brian, Colin Raffel, Dawen Liang, Daniel PW Ellis, Matt McVicar, Eric Battenberg,
+             and Oriol Nieto.
+           | "librosa: Audio and music signal analysis in python."
+           | In Proceedings of the 14th python in science conference, pp. 18-25. 2015.
+
+        .. [2]
+           | Perraudin, N., Balazs, P., & Søndergaard, P. L.
+           | "A fast Griffin-Lim algorithm,"
+           | IEEE Workshop on Applications of Signal Processing to Audio and Acoustics (pp. 1-4),
+           | Oct. 2013.
+
+        .. [3]
+           | D. W. Griffin and J. S. Lim,
+           | "Signal estimation from modified short-time Fourier transform,"
+           | IEEE Trans. ASSP, vol.32, no.2, pp.236–243, Apr. 1984.
     """
     __constants__ = ['n_fft', 'n_iter', 'win_length', 'hop_length', 'power', 'normalized',
                      'length', 'momentum', 'rand_init']
@@ -134,8 +141,8 @@ class GriffinLim(torch.nn.Module):
                  rand_init: bool = True) -> None:
         super(GriffinLim, self).__init__()
 
-        assert momentum < 1, 'momentum=%s > 1 can be unstable' % momentum
-        assert momentum > 0, 'momentum=%s < 0' % momentum
+        assert momentum < 1, 'momentum={} > 1 can be unstable'.format(momentum)
+        assert momentum > 0, 'momentum={} < 0'.format(momentum)
 
         self.n_fft = n_fft
         self.n_iter = n_iter
@@ -152,8 +159,9 @@ class GriffinLim(torch.nn.Module):
     def forward(self, specgram: Tensor) -> Tensor:
         r"""
         Args:
-            specgram (Tensor): A magnitude-only STFT spectrogram of dimension (..., freq, frames)
-            where freq is ``n_fft // 2 + 1``.
+            specgram (Tensor):
+                A magnitude-only STFT spectrogram of dimension (..., freq, frames)
+                where freq is ``n_fft // 2 + 1``.
 
         Returns:
             Tensor: waveform of (..., time), where time equals the ``length`` parameter if given.
@@ -190,7 +198,8 @@ class AmplitudeToDB(torch.nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         r"""Numerically stable implementation from Librosa.
-        https://librosa.github.io/librosa/_modules/librosa/core/spectrum.html
+
+        https://librosa.org/doc/latest/generated/librosa.amplitude_to_db.html
 
         Args:
             x (Tensor): Input tensor before being converted to decibel scale.
@@ -229,7 +238,7 @@ class MelScale(torch.nn.Module):
         self.f_max = f_max if f_max is not None else float(sample_rate // 2)
         self.f_min = f_min
 
-        assert f_min <= self.f_max, 'Require f_min: %f < f_max: %f' % (f_min, self.f_max)
+        assert f_min <= self.f_max, 'Require f_min: {} < f_max: {}'.format(f_min, self.f_max)
 
         fb = torch.empty(0) if n_stft is None else F.create_fb_matrix(
             n_stft, self.f_min, self.f_max, self.n_mels, self.sample_rate)
@@ -246,7 +255,7 @@ class MelScale(torch.nn.Module):
 
         # pack batch
         shape = specgram.size()
-        specgram = specgram.view(-1, shape[-2], shape[-1])
+        specgram = specgram.reshape(-1, shape[-2], shape[-1])
 
         if self.fb.numel() == 0:
             tmp_fb = F.create_fb_matrix(specgram.size(1), self.f_min, self.f_max, self.n_mels, self.sample_rate)
@@ -259,7 +268,7 @@ class MelScale(torch.nn.Module):
         mel_specgram = torch.matmul(specgram.transpose(1, 2), self.fb).transpose(1, 2)
 
         # unpack batch
-        mel_specgram = mel_specgram.view(shape[:-2] + mel_specgram.shape[-2:])
+        mel_specgram = mel_specgram.reshape(shape[:-2] + mel_specgram.shape[-2:])
 
         return mel_specgram
 
@@ -305,7 +314,7 @@ class InverseMelScale(torch.nn.Module):
         self.tolerance_change = tolerance_change
         self.sgdargs = sgdargs or {'lr': 0.1, 'momentum': 0.9}
 
-        assert f_min <= self.f_max, 'Require f_min: %f < f_max: %f' % (f_min, self.f_max)
+        assert f_min <= self.f_max, 'Require f_min: {} < f_max: {}'.format(f_min, self.f_max)
 
         fb = F.create_fb_matrix(n_stft, self.f_min, self.f_max, self.n_mels, self.sample_rate)
         self.register_buffer('fb', fb)
@@ -394,6 +403,8 @@ class MelSpectrogram(torch.nn.Module):
                  pad: int = 0,
                  n_mels: int = 128,
                  window_fn: Callable[..., Tensor] = torch.hann_window,
+                 power: Optional[float] = 2.,
+                 normalized: bool = False,
                  wkwargs: Optional[dict] = None) -> None:
         super(MelSpectrogram, self).__init__()
         self.sample_rate = sample_rate
@@ -401,13 +412,15 @@ class MelSpectrogram(torch.nn.Module):
         self.win_length = win_length if win_length is not None else n_fft
         self.hop_length = hop_length if hop_length is not None else self.win_length // 2
         self.pad = pad
+        self.power = power
+        self.normalized = normalized
         self.n_mels = n_mels  # number of mel frequency bins
         self.f_max = f_max
         self.f_min = f_min
         self.spectrogram = Spectrogram(n_fft=self.n_fft, win_length=self.win_length,
                                        hop_length=self.hop_length,
-                                       pad=self.pad, window_fn=window_fn, power=2.,
-                                       normalized=False, wkwargs=wkwargs)
+                                       pad=self.pad, window_fn=window_fn, power=self.power,
+                                       normalized=self.normalized, wkwargs=wkwargs)
         self.mel_scale = MelScale(self.n_mels, self.sample_rate, self.f_min, self.f_max, self.n_fft // 2 + 1)
 
     def forward(self, waveform: Tensor) -> Tensor:
@@ -484,7 +497,7 @@ class MFCC(torch.nn.Module):
 
         # pack batch
         shape = waveform.size()
-        waveform = waveform.view(-1, shape[-1])
+        waveform = waveform.reshape(-1, shape[-1])
 
         mel_specgram = self.MelSpectrogram(waveform)
         if self.log_mels:
@@ -497,7 +510,7 @@ class MFCC(torch.nn.Module):
         mfcc = torch.matmul(mel_specgram.transpose(1, 2), self.dct_mat).transpose(1, 2)
 
         # unpack batch
-        mfcc = mfcc.view(shape[:-1] + mfcc.shape[-2:])
+        mfcc = mfcc.reshape(shape[:-1] + mfcc.shape[-2:])
 
         return mfcc
 
@@ -595,7 +608,7 @@ class Resample(torch.nn.Module):
 
             return waveform
 
-        raise ValueError('Invalid resampling method: %s' % (self.resampling_method))
+        raise ValueError('Invalid resampling method: {}'.format(self.resampling_method))
 
 
 class ComplexNorm(torch.nn.Module):
@@ -778,6 +791,7 @@ class _AxisMasking(torch.nn.Module):
         mask_param (int): Maximum possible length of the mask.
         axis (int): What dimension the mask is applied on.
         iid_masks (bool): Applies iid masks to each of the examples in the batch dimension.
+            This option is applicable only when the input tensor is 4D.
     """
     __constants__ = ['mask_param', 'axis', 'iid_masks']
 
@@ -797,7 +811,6 @@ class _AxisMasking(torch.nn.Module):
         Returns:
             Tensor: Masked spectrogram of dimensions (..., freq, time).
         """
-
         # if iid_masks flag marked and specgram has a batch dimension
         if self.iid_masks and specgram.dim() == 4:
             return F.mask_along_axis_iid(specgram, self.mask_param, mask_value, self.axis + 1)
@@ -811,10 +824,10 @@ class FrequencyMasking(_AxisMasking):
     Args:
         freq_mask_param (int): maximum possible length of the mask.
             Indices uniformly sampled from [0, freq_mask_param).
-        iid_masks (bool, optional): whether to apply the same mask to all
-            the examples/channels in the batch. (Default: ``False``)
+        iid_masks (bool, optional): whether to apply different masks to each
+            example/channel in the batch. (Default: ``False``)
+            This option is applicable only when the input tensor is 4D.
     """
-
     def __init__(self, freq_mask_param: int, iid_masks: bool = False) -> None:
         super(FrequencyMasking, self).__init__(freq_mask_param, 1, iid_masks)
 
@@ -825,10 +838,10 @@ class TimeMasking(_AxisMasking):
     Args:
         time_mask_param (int): maximum possible length of the mask.
             Indices uniformly sampled from [0, time_mask_param).
-        iid_masks (bool, optional): whether to apply the same mask to all
-            the examples/channels in the batch. (Default: ``False``)
+        iid_masks (bool, optional): whether to apply different masks to each
+            example/channel in the batch. (Default: ``False``)
+            This option is applicable only when the input tensor is 4D.
     """
-
     def __init__(self, time_mask_param: int, iid_masks: bool = False) -> None:
         super(TimeMasking, self).__init__(time_mask_param, 2, iid_masks)
 
@@ -838,10 +851,10 @@ class Vol(torch.nn.Module):
 
     Args:
         gain (float): Interpreted according to the given gain_type:
-            If `gain_type’ = ‘amplitude’, `gain’ is a positive amplitude ratio.
-            If `gain_type’ = ‘power’, `gain’ is a power (voltage squared).
-            If `gain_type’ = ‘db’, `gain’ is in decibels.
-        gain_type (str, optional): Type of gain. One of: ‘amplitude’, ‘power’, ‘db’ (Default: ``"amplitude"``)
+            If ``gain_type`` = ``amplitude``, ``gain`` is a positive amplitude ratio.
+            If ``gain_type`` = ``power``, ``gain`` is a power (voltage squared).
+            If ``gain_type`` = ``db``, ``gain`` is in decibels.
+        gain_type (str, optional): Type of gain. One of: ``amplitude``, ``power``, ``db`` (Default: ``amplitude``)
     """
 
     def __init__(self, gain: float, gain_type: str = 'amplitude'):
@@ -907,3 +920,120 @@ class SlidingWindowCmn(torch.nn.Module):
         cmn_waveform = F.sliding_window_cmn(
             waveform, self.cmn_window, self.min_cmn_window, self.center, self.norm_vars)
         return cmn_waveform
+
+
+class Vad(torch.nn.Module):
+    r"""Voice Activity Detector. Similar to SoX implementation.
+    Attempts to trim silence and quiet background sounds from the ends of recordings of speech.
+    The algorithm currently uses a simple cepstral power measurement to detect voice,
+    so may be fooled by other things, especially music.
+
+    The effect can trim only from the front of the audio,
+    so in order to trim from the back, the reverse effect must also be used.
+
+    Args:
+        sample_rate (int): Sample rate of audio signal.
+        trigger_level (float, optional): The measurement level used to trigger activity detection.
+            This may need to be cahnged depending on the noise level, signal level,
+            and other characteristics of the input audio. (Default: 7.0)
+        trigger_time (float, optional): The time constant (in seconds)
+            used to help ignore short bursts of sound. (Default: 0.25)
+        search_time (float, optional): The amount of audio (in seconds)
+            to search for quieter/shorter bursts of audio to include prior
+            to the detected trigger point. (Default: 1.0)
+        allowed_gap (float, optional): The allowed gap (in seconds) between
+            quiteter/shorter bursts of audio to include prior
+            to the detected trigger point. (Default: 0.25)
+        pre_trigger_time (float, optional): The amount of audio (in seconds) to preserve
+            before the trigger point and any found quieter/shorter bursts. (Default: 0.0)
+        boot_time (float, optional) The algorithm (internally) uses adaptive noise
+            estimation/reduction in order to detect the start of the wanted audio.
+            This option sets the time for the initial noise estimate. (Default: 0.35)
+        noise_up_time (float, optional) Time constant used by the adaptive noise estimator
+            for when the noise level is increasing. (Default: 0.1)
+        noise_down_time (float, optional) Time constant used by the adaptive noise estimator
+            for when the noise level is decreasing. (Default: 0.01)
+        noise_reduction_amount (float, optional) Amount of noise reduction to use in
+            the detection algorithm (e.g. 0, 0.5, ...). (Default: 1.35)
+        measure_freq (float, optional) Frequency of the algorithm’s
+            processing/measurements. (Default: 20.0)
+        measure_duration: (float, optional) Measurement duration.
+            (Default: Twice the measurement period; i.e. with overlap.)
+        measure_smooth_time (float, optional) Time constant used to smooth
+            spectral measurements. (Default: 0.4)
+        hp_filter_freq (float, optional) "Brick-wall" frequency of high-pass filter applied
+            at the input to the detector algorithm. (Default: 50.0)
+        lp_filter_freq (float, optional) "Brick-wall" frequency of low-pass filter applied
+            at the input to the detector algorithm. (Default: 6000.0)
+        hp_lifter_freq (float, optional) "Brick-wall" frequency of high-pass lifter used
+            in the detector algorithm. (Default: 150.0)
+        lp_lifter_freq (float, optional) "Brick-wall" frequency of low-pass lifter used
+            in the detector algorithm. (Default: 2000.0)
+
+    References:
+        http://sox.sourceforge.net/sox.html
+    """
+
+    def __init__(self,
+                 sample_rate: int,
+                 trigger_level: float = 7.0,
+                 trigger_time: float = 0.25,
+                 search_time: float = 1.0,
+                 allowed_gap: float = 0.25,
+                 pre_trigger_time: float = 0.0,
+                 boot_time: float = .35,
+                 noise_up_time: float = .1,
+                 noise_down_time: float = .01,
+                 noise_reduction_amount: float = 1.35,
+                 measure_freq: float = 20.0,
+                 measure_duration: Optional[float] = None,
+                 measure_smooth_time: float = .4,
+                 hp_filter_freq: float = 50.,
+                 lp_filter_freq: float = 6000.,
+                 hp_lifter_freq: float = 150.,
+                 lp_lifter_freq: float = 2000.) -> None:
+        super().__init__()
+
+        self.sample_rate = sample_rate
+        self.trigger_level = trigger_level
+        self.trigger_time = trigger_time
+        self.search_time = search_time
+        self.allowed_gap = allowed_gap
+        self.pre_trigger_time = pre_trigger_time
+        self.boot_time = boot_time
+        self.noise_up_time = noise_up_time
+        self.noise_down_time = noise_up_time
+        self.noise_reduction_amount = noise_reduction_amount
+        self.measure_freq = measure_freq
+        self.measure_duration = measure_duration
+        self.measure_smooth_time = measure_smooth_time
+        self.hp_filter_freq = hp_filter_freq
+        self.lp_filter_freq = lp_filter_freq
+        self.hp_lifter_freq = hp_lifter_freq
+        self.lp_lifter_freq = lp_lifter_freq
+
+    def forward(self, waveform: Tensor) -> Tensor:
+        r"""
+        Args:
+            waveform (Tensor): Tensor of audio of dimension `(..., time)`
+        """
+        return F.vad(
+            waveform=waveform,
+            sample_rate=self.sample_rate,
+            trigger_level=self.trigger_level,
+            trigger_time=self.trigger_time,
+            search_time=self.search_time,
+            allowed_gap=self.allowed_gap,
+            pre_trigger_time=self.pre_trigger_time,
+            boot_time=self.boot_time,
+            noise_up_time=self.noise_up_time,
+            noise_down_time=self.noise_up_time,
+            noise_reduction_amount=self.noise_reduction_amount,
+            measure_freq=self.measure_freq,
+            measure_duration=self.measure_duration,
+            measure_smooth_time=self.measure_smooth_time,
+            hp_filter_freq=self.hp_filter_freq,
+            lp_filter_freq=self.lp_filter_freq,
+            hp_lifter_freq=self.hp_lifter_freq,
+            lp_lifter_freq=self.lp_lifter_freq,
+        )

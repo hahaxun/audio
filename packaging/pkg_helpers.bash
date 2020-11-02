@@ -32,7 +32,7 @@ setup_cuda() {
   # First, compute version suffixes.  By default, assume no version suffixes
   export VERSION_SUFFIX=""
   export PYTORCH_VERSION_SUFFIX=""
-  export WHEEL_DIR=""
+  export WHEEL_DIR="cpu/"
   # Wheel builds need suffixes (but not if they're on OS X, which never has suffix)
   if [[ "$BUILD_TYPE" == "wheel" ]] && [[ "$(uname)" != Darwin ]]; then
     # The default CUDA has no suffix
@@ -122,7 +122,7 @@ retry () {
 #
 # Precondition: If Linux, you are in a soumith/manylinux-cuda* Docker image
 setup_wheel_python() {
-  if [[ "$(uname)" == Darwin ]]; then
+  if [[ "$(uname)" == Darwin || "$OSTYPE" == "msys" ]]; then
     eval "$(conda shell.bash hook)"
     conda env remove -n "env$PYTHON_VERSION" || true
     conda create -yn "env$PYTHON_VERSION" python="$PYTHON_VERSION"
@@ -171,7 +171,7 @@ setup_pip_pytorch_version() {
   else
     pip_install "torch==$PYTORCH_VERSION$PYTORCH_VERSION_SUFFIX" \
       -f https://download.pytorch.org/whl/torch_stable.html \
-      -f https://download.pytorch.org/whl/nightly/torch_nightly.html
+      -f "https://download.pytorch.org/whl/${UPLOAD_CHANNEL}/torch_${UPLOAD_CHANNEL}.html"
   fi
 }
 
@@ -184,7 +184,7 @@ setup_conda_pytorch_constraint() {
     export CONDA_CHANNEL_FLAGS="-c pytorch-nightly"
     export PYTORCH_VERSION="$(conda search --json 'pytorch[channel=pytorch-nightly]' | python -c "import sys, json, re; print(re.sub(r'\\+.*$', '', json.load(sys.stdin)['pytorch'][-1]['version']))")"
   else
-    export CONDA_CHANNEL_FLAGS="-c pytorch -c pytorch-nightly"
+    export CONDA_CHANNEL_FLAGS="-c pytorch -c pytorch-${UPLOAD_CHANNEL}"
   fi
   if [[ "$CU_VERSION" == cpu ]]; then
     export CONDA_PYTORCH_BUILD_CONSTRAINT="- pytorch==$PYTORCH_VERSION${PYTORCH_VERSION_SUFFIX}"
